@@ -525,24 +525,71 @@ async function loadFromDrive(){
   try{
     const data=await jsonpRequest(SCRIPT_URL+'?action=load&t='+Date.now());
     let raw=data;
-    // Desaninha todos os formatos possíveis
     while(raw&&!Array.isArray(raw)&&raw.tasks&&typeof raw.tasks==='object'&&!Array.isArray(raw.tasks)&&raw.tasks.tasks){raw=raw.tasks}
-    if(Array.isArray(raw)){tasks=raw;waiting=[];notes='';projects=[]}
-    else{tasks=Array.isArray(raw.tasks)?raw.tasks:[];waiting=raw.waiting||[];notes=raw.notes||'';projects=raw.projects||[]}
+    const newTasks=Array.isArray(raw)?raw:(Array.isArray(raw.tasks)?raw.tasks:[]);
+    const newWaiting=raw.waiting||[];
+    const newNotes=raw.notes||'';
+    const newProjects=raw.projects||[];
+
+    // PROTEÇÃO: se Drive retornou menos tarefas que o backup local, avisa
+    const localBackup=localStorage.getItem('taskapp_backup');
+    if(localBackup){
+      const lb=JSON.parse(localBackup);
+      const localCount=lb.tasks?lb.tasks.length:0;
+      if(newTasks.length < localCount && localCount > 0){
+        const diff=localCount-newTasks.length;
+        const ok=confirm(`⚠️ ATENÇÃO: O Google Drive tem ${newTasks.length} tarefa(s), mas seu backup local tem ${localCount}.
+
+Diferença: ${diff} tarefa(s) a menos no Drive.
+
+Clique OK para usar os dados do Drive.
+Clique Cancelar para manter o backup local.`);
+        if(!ok){
+          tasks=lb.tasks||[];waiting=lb.waiting||[];notes=lb.notes||'';projects=lb.projects||[];
+          document.getElementById('notes-content').value=notes;
+          checkRecurring();showDailySummary();updateMeta();updateWaitBadge();refreshProjectSelects();
+          setSyncStatus('err','Usando backup local — Drive com menos dados');render();return;
+        }
+      }
+    }
+
+    tasks=newTasks;waiting=newWaiting;notes=newNotes;projects=newProjects;
+    // Salva backup local sempre que carregar com sucesso
+    localStorage.setItem('taskapp_backup',JSON.stringify({tasks,waiting,notes,projects,savedAt:new Date().toISOString()}));
     document.getElementById('notes-content').value=notes;
     checkRecurring();showDailySummary();updateMeta();updateWaitBadge();refreshProjectSelects();
     setSyncStatus('ok','Sincronizado · '+fmtNow());render();
-  }catch(e){setSyncStatus('err','Erro: '+e.message);render()}
+  }catch(e){
+    // Se falhar, tenta usar backup local
+    const localBackup=localStorage.getItem('taskapp_backup');
+    if(localBackup){
+      const lb=JSON.parse(localBackup);
+      tasks=lb.tasks||[];waiting=lb.waiting||[];notes=lb.notes||'';projects=lb.projects||[];
+      document.getElementById('notes-content').value=notes;
+      checkRecurring();showDailySummary();updateMeta();updateWaitBadge();refreshProjectSelects();
+      setSyncStatus('err','Drive offline — usando backup local de '+fmtDate(lb.savedAt));render();
+    }else{
+      setSyncStatus('err','Erro: '+e.message);render();
+    }
+  }
 }
 async function saveToDrive(){
   setSyncStatus('loading','Salvando...');
   try{
     notes=document.getElementById('notes-content').value;
-    const enc=encodeURIComponent(JSON.stringify({tasks,waiting,notes,projects}));
+    const payload={tasks,waiting,notes,projects};
+    // Salva backup local antes de enviar ao Drive
+    localStorage.setItem('taskapp_backup',JSON.stringify({...payload,savedAt:new Date().toISOString()}));
+    const enc=encodeURIComponent(JSON.stringify(payload));
     const data=await jsonpRequest(SCRIPT_URL+'?action=save&data='+enc+'&t='+Date.now());
-    if(data.ok){setSyncStatus('ok','Salvo · '+fmtNow());document.getElementById('notes-saved-label').textContent='Salvo às '+fmtNow()}
-    else setSyncStatus('err','Erro ao salvar');
-  }catch(e){setSyncStatus('err','Erro: '+e.message)}
+    if(data.ok){
+      setSyncStatus('ok','Salvo · '+fmtNow()+' ('+tasks.length+' tarefas)');
+      document.getElementById('notes-saved-label').textContent='Salvo às '+fmtNow();
+    }else setSyncStatus('err','Erro ao salvar no Drive');
+  }catch(e){
+    // Mesmo se Drive falhar, backup local já foi salvo
+    setSyncStatus('err','Drive offline — dados salvos localmente');
+  }
 }
 function scheduleSave(){clearTimeout(saveTimer);saveTimer=setTimeout(saveToDrive,900)}
 function saveNotes(){saveToDrive()}
