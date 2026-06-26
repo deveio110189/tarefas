@@ -167,6 +167,26 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .modal-task-name{font-size:13px;color:var(--text2);font-style:italic;margin-bottom:4px}
 .kbd-hint{font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px;margin-top:6px;flex-wrap:wrap}
 kbd{background:var(--bg3);border:0.5px solid var(--border2);border-radius:3px;padding:1px 5px;font-size:10px;font-family:monospace}
+
+/* DAILY TASKS SECTION */
+.daily-section{margin-bottom:1.25rem}
+.daily-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px 12px;background:linear-gradient(135deg,rgba(127,119,221,0.15),rgba(127,119,221,0.05));border-radius:var(--radius);border-left:3px solid var(--accent)}
+.daily-header h2{font-size:13px;font-weight:600;color:var(--accent);display:flex;align-items:center;gap:6px;flex:1}
+.daily-header .daily-progress{font-size:12px;color:var(--text2)}
+.daily-card{display:flex;align-items:flex-start;gap:10px;padding:11px 13px;background:var(--bg);border:0.5px solid rgba(127,119,221,0.3);border-left:3px solid var(--accent);border-radius:var(--radius);transition:all 0.15s;position:relative}
+.daily-card:hover{border-color:var(--accent);box-shadow:0 1px 4px rgba(127,119,221,0.15)}
+.daily-card.done-today{opacity:0.6;background:rgba(62,158,95,0.05);border-left-color:var(--low);border-color:rgba(62,158,95,0.3)}
+.daily-card.done-today .task-text{text-decoration:line-through;color:var(--text2)}
+.daily-cb{width:20px;height:20px;border:1.5px solid var(--accent);border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;transition:all 0.15s;background:transparent}
+.daily-cb.checked{background:var(--low);border-color:var(--low)}
+.daily-cb.checked i{color:#fff;font-size:12px}
+.daily-badge{font-size:10px;padding:1px 7px;border-radius:10px;background:var(--accent-light);color:var(--accent);font-weight:500}
+.daily-done-badge{font-size:10px;padding:1px 7px;border-radius:10px;background:rgba(62,158,95,0.12);color:var(--low);font-weight:500}
+.daily-streak{font-size:10px;color:var(--text3);display:flex;align-items:center;gap:3px}
+.normal-section{margin-bottom:1rem}
+.normal-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:6px 12px;border-radius:var(--radius);border-left:3px solid var(--border2)}
+.normal-header h2{font-size:13px;font-weight:600;color:var(--text2);display:flex;align-items:center;gap:6px}
+
 </style>
 </head>
 <body>
@@ -856,20 +876,120 @@ function renderStats(){
     <div class="stat"><div class="stat-num" style="color:var(--high)">${overdue}</div><div class="stat-label">Atrasadas</div></div>`;
 }
 function render(){renderStats();updateMeta();if(currentTab==='today')renderToday();else if(currentTab==='done')renderDone();else if(currentTab==='waiting')renderWaiting()}
+function todayStr(){return new Date().toDateString()}
+
+function isDoneToday(t){
+  if(!t.recurring)return false;
+  return t.dailyCompletions&&t.dailyCompletions[todayStr()];
+}
+
+function toggleDailyDone(id){
+  const t=tasks.find(t=>t.id===id);if(!t)return;
+  if(!t.dailyCompletions)t.dailyCompletions={};
+  const today=todayStr();
+  if(t.dailyCompletions[today]){
+    delete t.dailyCompletions[today];
+  }else{
+    t.dailyCompletions[today]={completedAt:new Date().toISOString()};
+  }
+  scheduleSave();renderToday();
+}
+
+function dailyStreakCount(t){
+  if(!t.dailyCompletions)return 0;
+  let streak=0,d=new Date();
+  while(true){
+    if(t.dailyCompletions[d.toDateString()])streak++;
+    else break;
+    d.setDate(d.getDate()-1);
+  }
+  return streak;
+}
+
+function dailyCardHTML(t){
+  const doneToday=isDoneToday(t);
+  const streak=dailyStreakCount(t);
+  const proj=t.project?projById(t.project):null;
+  const projHTML=proj?`<span class="proj-badge" style="background:${proj.color}22;color:${proj.color}"><i class="ti ti-folder" style="font-size:10px"></i> ${esc(proj.name)}</span>`:'';
+  const totalDays=Object.keys(t.dailyCompletions||{}).length;
+  return`<div class="daily-card${doneToday?' done-today':''}">
+    <div class="daily-cb${doneToday?' checked':''}" onclick="toggleDailyDone('${t.id}')" title="${doneToday?'Desmarcar':'Marcar como feita hoje'}">
+      ${doneToday?'<i class="ti ti-check"></i>':''}
+    </div>
+    <div class="task-body">
+      <div class="task-text">${esc(t.text)}</div>
+      <div class="task-meta">
+        ${doneToday?'<span class="daily-done-badge"><i class="ti ti-circle-check" style="font-size:10px"></i> Feita hoje</span>':'<span class="daily-badge"><i class="ti ti-repeat" style="font-size:10px"></i> Diária</span>'}
+        ${streak>1?`<span class="daily-streak"><i class="ti ti-flame" style="font-size:10px;color:#e07b3e"></i> ${streak} dias seguidos</span>`:''}
+        ${totalDays>0?`<span class="task-date">${totalDays}x concluída no total</span>`:''}
+        ${t.note?`<span class="task-note" title="${esc(t.note)}"><i class="ti ti-note" style="font-size:10px"></i> ${esc(t.note)}</span>`:''}
+        ${projHTML}
+      </div>
+    </div>
+    <div class="task-actions">
+      <button class="btn icon" onclick="openEditModal('${t.id}')" title="Editar"><i class="ti ti-edit"></i></button>
+      <button class="btn icon" onclick="deleteTask('${t.id}')" title="Excluir"><i class="ti ti-trash"></i></button>
+    </div>
+  </div>`;
+}
+
 function renderToday(){
   let list=tasks.filter(t=>!t.done);
   if(currentProject!=='all')list=list.filter(t=>t.project===currentProject);
-  if(currentPriorityFilter==='high')list=list.filter(t=>t.priority==='high');
-  else if(currentPriorityFilter==='medium')list=list.filter(t=>t.priority==='medium');
-  else if(currentPriorityFilter==='low')list=list.filter(t=>t.priority==='low');
-  else if(currentPriorityFilter==='overdue')list=list.filter(t=>isOverdue(t));
-  else if(currentPriorityFilter==='pinned')list=list.filter(t=>t.pinned);
-  list.sort((a,b)=>{
+
+  // Separa diárias das normais
+  let dailyList=list.filter(t=>t.recurring==='daily');
+  let normalList=list.filter(t=>t.recurring!=='daily');
+
+  // Aplica filtros de prioridade apenas nas normais
+  if(currentPriorityFilter==='high')normalList=normalList.filter(t=>t.priority==='high');
+  else if(currentPriorityFilter==='medium')normalList=normalList.filter(t=>t.priority==='medium');
+  else if(currentPriorityFilter==='low')normalList=normalList.filter(t=>t.priority==='low');
+  else if(currentPriorityFilter==='overdue')normalList=normalList.filter(t=>isOverdue(t));
+  else if(currentPriorityFilter==='pinned')normalList=normalList.filter(t=>t.pinned);
+
+  // Ordena normais: fixadas > atrasadas > prioridade
+  normalList.sort((a,b)=>{
     if(a.pinned!==b.pinned)return a.pinned?-1:1;
     const oa=isOverdue(a)?0:1,ob=isOverdue(b)?0:1;if(oa!==ob)return oa-ob;
     const po={high:0,medium:1,low:2,none:3};return(po[a.priority||'none']||3)-(po[b.priority||'none']||3);
   });
-  document.getElementById('task-list').innerHTML=list.length?list.map(taskHTML).join(''):`<div class="empty"><i class="ti ti-circle-check"></i>Nenhuma tarefa pendente. Ótimo trabalho!</div>`;
+
+  // Ordena diárias: não feitas primeiro, depois feitas hoje
+  dailyList.sort((a,b)=>{
+    const da=isDoneToday(a)?1:0,db=isDoneToday(b)?1:0;
+    return da-db;
+  });
+
+  const doneDailyCount=dailyList.filter(t=>isDoneToday(t)).length;
+  const totalDaily=dailyList.length;
+
+  let html='';
+
+  // Seção Tarefas Diárias
+  if(dailyList.length>0){
+    html+=`<div class="daily-section">
+      <div class="daily-header">
+        <h2><i class="ti ti-repeat"></i> Tarefas Diárias</h2>
+        <span class="daily-progress">${doneDailyCount}/${totalDaily} concluídas hoje</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${dailyList.map(dailyCardHTML).join('')}
+      </div>
+    </div>`;
+  }
+
+  // Seção Tarefas Normais
+  if(normalList.length>0||dailyList.length===0){
+    html+=`<div class="normal-section">`;
+    if(dailyList.length>0){
+      html+=`<div class="normal-header"><h2><i class="ti ti-list"></i> Outras Tarefas</h2></div>`;
+    }
+    html+=normalList.length?`<div style="display:flex;flex-direction:column;gap:6px">${normalList.map(taskHTML).join('')}</div>`:`<div class="empty"><i class="ti ti-circle-check"></i>Nenhuma tarefa pendente. Ótimo trabalho!</div>`;
+    html+=`</div>`;
+  }
+
+  document.getElementById('task-list').innerHTML=html||`<div class="empty"><i class="ti ti-circle-check"></i>Nenhuma tarefa pendente. Ótimo trabalho!</div>`;
 }
 function renderDone(){
   const kw=(document.getElementById('search-input')?.value||'').toLowerCase();
