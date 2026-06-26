@@ -195,7 +195,7 @@ kbd{background:var(--bg3);border:0.5px solid var(--border2);border-radius:3px;pa
     <div class="sync-dot" id="sync-dot"></div>
     <span id="sync-label">Conectando...</span>
     <div class="ml" style="display:flex;gap:6px">
-      <button class="btn sm" onclick="loadFromDrive()"><i class="ti ti-refresh"></i> Sincronizar</button>
+      <button class="btn sm" id="sync-btn" onclick="loadFromDrive()"><i class="ti ti-refresh"></i> Sincronizar</button>
     </div>
   </div>
   <div class="topbar">
@@ -414,6 +414,7 @@ kbd{background:var(--bg3);border:0.5px solid var(--border2);border-radius:3px;pa
 <script>
 const SCRIPT_URL='https://script.google.com/macros/s/AKfycbzilutYokAI3wFp4MAtz_60n1nzZOlbn1ceTqLNZIT8VBNqvaeglFbFW8afOk4v2XZ08Q/exec';
 let tasks=[],waiting=[],notes='',projects=[];
+let isDirty=false; // true quando há alterações locais não salvas no Drive
 let currentTab='today',currentPeriod='all',currentPriorityFilter='all',waitFilter='all',currentProject='all';
 let pendingId=null,editingId=null,editingWaitId=null,saveTimer=null;
 let chartInstances={},dragSrcId=null;
@@ -541,6 +542,20 @@ function jsonpRequest(url){
   });
 }
 async function loadFromDrive(){
+  // Se há alterações locais não salvas, salva PRIMEIRO antes de carregar
+  if(isDirty){
+    const ok=confirm('Você tem alterações não salvas.\n\nDeseja salvar antes de sincronizar?\n\nOK = Salvar e sincronizar\nCancelar = Descartar alterações e sincronizar');
+    if(ok){
+      await saveToDrive();
+      if(isDirty){
+        // Se ainda dirty, save falhou
+        setSyncStatus('err','Falha ao salvar. Tente novamente antes de sincronizar.');
+        return;
+      }
+    }else{
+      isDirty=false;
+    }
+  }
   setSyncStatus('loading','Carregando...');
   try{
     const data=await jsonpRequest(SCRIPT_URL+'?action=load&t='+Date.now());
@@ -603,15 +618,30 @@ async function saveToDrive(){
     const enc=encodeURIComponent(JSON.stringify(payload));
     const data=await jsonpRequest(SCRIPT_URL+'?action=save&data='+enc+'&t='+Date.now());
     if(data.ok){
+      isDirty=false;
       setSyncStatus('ok','Salvo · '+fmtNow()+' ('+tasks.length+' tarefas)');
       document.getElementById('notes-saved-label').textContent='Salvo às '+fmtNow();
-    }else setSyncStatus('err','Erro ao salvar no Drive');
+    }else{
+      setSyncStatus('err','Erro ao salvar — clique Sincronizar para tentar novamente');
+    }
   }catch(e){
-    // Mesmo se Drive falhar, backup local já foi salvo
-    setSyncStatus('err','Drive offline — dados salvos localmente');
+    setSyncStatus('err','Drive offline — dados preservados localmente');
   }
 }
-function scheduleSave(){clearTimeout(saveTimer);saveTimer=setTimeout(saveToDrive,900)}
+function scheduleSave(){
+  isDirty=true;
+  updateSyncIndicator();
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(saveToDrive,900);
+}
+
+function updateSyncIndicator(){
+  const label=document.getElementById('sync-label');
+  if(isDirty&&!label.textContent.startsWith('Salvando')){
+    document.getElementById('sync-dot').className='sync-dot loading';
+    label.textContent='Alterações pendentes...';
+  }
+}
 function saveNotes(){saveToDrive()}
 
 // ── GLOBAL SEARCH ──────────────────────────────────────────────
